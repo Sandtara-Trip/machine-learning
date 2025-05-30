@@ -117,6 +117,8 @@ def preprocess_text(text, slang_dict):
         return ""
 
   text = text.lower() #Konvert teks ke lower case
+  text = ''.join(c for c in text if c.isprintable())
+  text = re.sub(r'[\u2066\u2067\u2068\u2069]', '', text)
   text = remove_emoji(text) #Menghapus emoji
   text = re.sub(r"http\S+|www\S+", '', text) #Menghilangkan URL
   text = re.sub(r'#[A-Za-z0-9_]+|@[A-Za-z0-9_]+', '', text) #Menghilangkan hashtag dan mention
