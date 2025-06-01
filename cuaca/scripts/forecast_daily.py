@@ -1,6 +1,5 @@
 import os
 import json
-import time
 import datetime
 import calendar
 import requests
@@ -11,6 +10,10 @@ import logging
 from tensorflow.keras.models import load_model
 from apscheduler.schedulers.blocking import BlockingScheduler
 from apscheduler.triggers.cron import CronTrigger
+from flask import Flask, jsonify, request
+import sys
+from io import StringIO
+import pytz
 
 # Setup logging
 logging.basicConfig(
@@ -23,6 +26,12 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
+# Inisialisasi Flask app
+app = Flask(__name__)
+
+# Zona waktu WITA (UTC+8)
+WITA = pytz.timezone('Asia/Makassar')
+
 # ================== KONFIGURASI ==================
 LATITUDE = -8.65
 LONGITUDE = 115.22
@@ -30,7 +39,7 @@ LONGITUDE = 115.22
 # Features yang akan digunakan untuk prediksi (sesuai dengan training)
 DAILY_FEATS = [
     "temperature_2m_max",
-    "temperature_2m_min", 
+    "temperature_2m_min",
     "precipitation_sum",
     "day_length",
     "day_of_month"
@@ -41,7 +50,7 @@ BASE_API_URL = "https://api.open-meteo.com/v1/forecast"
 DAILY_API_URL = (
     f"{BASE_API_URL}?latitude={LATITUDE}&longitude={LONGITUDE}"
     f"&daily=temperature_2m_max,temperature_2m_min,precipitation_sum,sunrise,sunset"
-    f"&timezone=auto"
+    f"&timezone=Asia/Makassar"
 )
 
 # File paths
@@ -137,8 +146,8 @@ def load_model_and_preprocessors():
 def fetch_daily_weather_data(days_back=35):
     """Fetch daily weather data from Open-Meteo API"""
     try:
-        # Calculate date range
-        end_date = datetime.date.today()
+        # Calculate date range berdasarkan WITA
+        end_date = datetime.datetime.now(WITA).date()
         start_date = end_date - datetime.timedelta(days=days_back)
         
         # Build API URL
@@ -147,7 +156,7 @@ def fetch_daily_weather_data(days_back=35):
             f"&daily=temperature_2m_max,temperature_2m_min,precipitation_sum,sunrise,sunset"
             f"&start_date={start_date.strftime('%Y-%m-%d')}"
             f"&end_date={end_date.strftime('%Y-%m-%d')}"
-            f"&timezone=auto"
+            f"&timezone=Asia/Makassar"
         )
         
         logger.info(f"Fetching daily data from {start_date} to {end_date}")
@@ -167,10 +176,10 @@ def fetch_daily_weather_data(days_back=35):
             "sunset": daily_data["sunset"]
         })
         
-        # Convert time columns to datetime
-        df['time'] = pd.to_datetime(df['time'])
-        df['sunrise'] = pd.to_datetime(df['sunrise'])
-        df['sunset'] = pd.to_datetime(df['sunset'])
+        # Convert time columns to datetime dengan WITA
+        df['time'] = pd.to_datetime(df['time']).dt.tz_localize(WITA)
+        df['sunrise'] = pd.to_datetime(df['sunrise']).dt.tz_localize(WITA)
+        df['sunset'] = pd.to_datetime(df['sunset']).dt.tz_localize(WITA)
         
         # Handle missing values
         for col in ['temperature_2m_max', 'temperature_2m_min']:
@@ -209,7 +218,7 @@ def create_dummy_daily_data():
     """Create dummy daily data as fallback"""
     try:
         dummy_data = []
-        base_date = datetime.date.today() - datetime.timedelta(days=PAST_DAYS)
+        base_date = datetime.datetime.now(WITA).date() - datetime.timedelta(days=PAST_DAYS)
         
         for i in range(PAST_DAYS):
             date = base_date + datetime.timedelta(days=i)
@@ -220,13 +229,13 @@ def create_dummy_daily_data():
                 "temperature_2m_max": 30 + np.random.normal(0, 2),
                 "temperature_2m_min": 24 + np.random.normal(0, 1.5),
                 "precipitation_sum": max(0, np.random.exponential(1)),
-                "sunrise": f"{date}T06:00:00",
-                "sunset": f"{date}T18:30:00"
+                "sunrise": f"{date}T06:00:00+08:00",
+                "sunset": f"{date}T18:30:00+08:00"
             }
             dummy_data.append(dummy_record)
         
         df = pd.DataFrame(dummy_data)
-        df['time'] = pd.to_datetime(df['time'])
+        df['time'] = pd.to_datetime(df['time']).dt.tz_localize(WITA)
         df['sunrise'] = pd.to_datetime(df['sunrise'])
         df['sunset'] = pd.to_datetime(df['sunset'])
         
@@ -268,13 +277,13 @@ def make_daily_prediction(model, scaler, label_encoder):
             df_daily.to_csv(DAILY_HISTORY_CSV, index=False)
         else:
             df_daily = pd.read_csv(DAILY_HISTORY_CSV)
-            df_daily['time'] = pd.to_datetime(df_daily['time'])
-            df_daily['sunrise'] = pd.to_datetime(df_daily['sunrise'])
-            df_daily['sunset'] = pd.to_datetime(df_daily['sunset'])
+            df_daily['time'] = pd.to_datetime(df_daily['time']).dt.tz_localize(WITA)
+            df_daily['sunrise'] = pd.to_datetime(df_daily['sunrise']).dt.tz_localize(WITA)
+            df_daily['sunset'] = pd.to_datetime(df_daily['sunset']).dt.tz_localize(WITA)
             
             # Update dengan data terbaru jika perlu
             last_date = df_daily['time'].max().date()
-            today = datetime.date.today()
+            today = datetime.datetime.now(WITA).date()
             
             if (today - last_date).days > 1:
                 logger.info("Updating daily data...")
@@ -305,7 +314,7 @@ def make_daily_prediction(model, scaler, label_encoder):
         predictions = model.predict(X_input, verbose=0)
         
         # 6. Process predictions
-        y_class_pred = predictions[0]  # (1, 1, num_classes) 
+        y_class_pred = predictions[0]  # (1, 1, num_classes)
         y_reg_pred = predictions[1]    # (1, 1, 3) - temp_max, temp_min, precip
         
         # Get weather class
@@ -320,14 +329,14 @@ def make_daily_prediction(model, scaler, label_encoder):
         # Create dummy array for inverse transform
         dummy = np.zeros((1, len(DAILY_FEATS)))
         dummy[0, 0] = reg_scaled[0]  # temp_max
-        dummy[0, 1] = reg_scaled[1]  # temp_min  
+        dummy[0, 1] = reg_scaled[1]  # temp_min
         dummy[0, 2] = reg_scaled[2]  # precipitation
         
         # Get current month for day_length average
-        current_month = datetime.date.today().month
+        current_month = datetime.datetime.now(WITA).month
         avg_day_length = df_daily.groupby(df_daily['time'].dt.month)['day_length'].mean().get(current_month, 12.0)
         dummy[0, 3] = scaler.transform([[0, 0, 0, avg_day_length, 1]])[0, 3]  # normalized day_length
-        dummy[0, 4] = scaler.transform([[0, 0, 0, 0, datetime.date.today().day]])[0, 4]  # normalized day_of_month
+        dummy[0, 4] = scaler.transform([[0, 0, 0, 0, datetime.datetime.now(WITA).day]])[0, 4]  # normalized day_of_month
         
         inv = scaler.inverse_transform(dummy)
         pred_temp_max = float(inv[0, 0])
@@ -335,7 +344,7 @@ def make_daily_prediction(model, scaler, label_encoder):
         pred_precip_sum = float(max(0, inv[0, 2]))  # Ensure non-negative precipitation
         
         # 7. Create prediction result
-        tomorrow = datetime.date.today() + datetime.timedelta(days=1)
+        tomorrow = datetime.datetime.now(WITA).date() + datetime.timedelta(days=1)
         
         prediction_result = {
             "date": tomorrow.strftime("%Y-%m-%d"),
@@ -365,7 +374,7 @@ def make_daily_prediction(model, scaler, label_encoder):
 
 # ================== EXTENDED PREDICTION (hingga akhir bulan) ==================
 def make_extended_daily_prediction(model, scaler, label_encoder):
-    """Make extended daily prediction until end of month (like original code)"""
+    """Make extended daily prediction until end of month"""
     try:
         # Load daily data
         if not os.path.exists(DAILY_HISTORY_CSV):
@@ -373,9 +382,9 @@ def make_extended_daily_prediction(model, scaler, label_encoder):
             df_daily.to_csv(DAILY_HISTORY_CSV, index=False)
         else:
             df_daily = pd.read_csv(DAILY_HISTORY_CSV)
-            df_daily['time'] = pd.to_datetime(df_daily['time'])
-            df_daily['sunrise'] = pd.to_datetime(df_daily['sunrise'])
-            df_daily['sunset'] = pd.to_datetime(df_daily['sunset'])
+            df_daily['time'] = pd.to_datetime(df_daily['time']).dt.tz_localize(WITA)
+            df_daily['sunrise'] = pd.to_datetime(df_daily['sunrise']).dt.tz_localize(WITA)
+            df_daily['sunset'] = pd.to_datetime(df_daily['sunset']).dt.tz_localize(WITA)
         
         # Prepare features
         if 'delta_temp' not in df_daily.columns:
@@ -389,7 +398,7 @@ def make_extended_daily_prediction(model, scaler, label_encoder):
         df_daily_scaled = df_daily.copy()
         df_daily_scaled[DAILY_FEATS] = scaler.transform(df_daily_scaled[DAILY_FEATS])
         
-        # Setup prediction loop (sama seperti kode asli)
+        # Setup prediction loop
         last_date = df_daily['time'].max().date()
         start_date = last_date + datetime.timedelta(days=1)
         
@@ -417,7 +426,7 @@ def make_extended_daily_prediction(model, scaler, label_encoder):
             reg_scaled = predictions[1][0, 0, :]
             dummy = np.zeros((1, len(DAILY_FEATS)))
             dummy[0, 0] = reg_scaled[0]
-            dummy[0, 1] = reg_scaled[1] 
+            dummy[0, 1] = reg_scaled[1]
             dummy[0, 2] = reg_scaled[2]
             inv = scaler.inverse_transform(dummy)
             pred_temp_max = float(inv[0, 0])
@@ -458,7 +467,7 @@ def save_daily_predictions_to_json(current_weather, tomorrow_prediction, extende
     """Save daily prediction results to JSON"""
     try:
         result = {
-            "generated_at": datetime.datetime.now().strftime("%Y-%m-%dT%H:%M:%S"),
+            "generated_at": datetime.datetime.now(WITA).strftime("%Y-%m-%dT%H:%M:%S%z"),
             "location": {
                 "latitude": LATITUDE,
                 "longitude": LONGITUDE,
@@ -479,7 +488,7 @@ def save_daily_predictions_to_json(current_weather, tomorrow_prediction, extende
             result["metadata"]["extended_days"] = len(extended_predictions)
         
         # Save files
-        timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
+        timestamp = datetime.datetime.now(WITA).strftime("%Y%m%d_%H%M%S")
         filename = f"daily_weather_predictions_{timestamp}.json"
         latest_filename = "latest_daily_weather_predictions.json"
         
@@ -526,18 +535,18 @@ def run_daily_prediction_job():
 # ================== SCHEDULER ==================
 def start_daily_scheduler():
     """Start scheduler untuk daily predictions"""
-    scheduler = BlockingScheduler()
+    scheduler = BlockingScheduler(timezone=WITA)
     
-    # Run daily at 6:00 AM
+    # Run daily at 6:00 AM WITA
     scheduler.add_job(
         run_daily_prediction_job,
-        CronTrigger(hour=6, minute=0),
+        CronTrigger(hour=6, minute=0, timezone=WITA),
         id='daily_weather_prediction',
         name='Daily Weather Prediction',
         misfire_grace_time=1800  # 30 minutes grace time
     )
     
-    logger.info("Daily scheduler started. Predictions will run every day at 6:00 AM.")
+    logger.info("Daily scheduler started. Predictions will run every day at 6:00 AM WITA.")
     logger.info("Press Ctrl+C to stop the scheduler.")
     
     try:
@@ -549,21 +558,22 @@ def start_daily_scheduler():
 # ================== DEBUGGING ==================
 def test_daily_api_and_files():
     """Test function untuk debugging daily prediction"""
-    print("=== DAILY PREDICTION DEBUGGING TEST ===")
+    output = []
+    output.append("=== DAILY PREDICTION DEBUGGING TEST ===")
     
     # Test 1: File access
-    print(f"📁 Current directory: {os.getcwd()}")
+    output.append(f"📁 Current directory: {os.getcwd()}")
     
     # Test 2: Model files
-    print("\n🔍 Looking for daily model files...")
+    output.append("\n🔍 Looking for daily model files...")
     model_files = find_model_files()
     for file_type, path in model_files.items():
-        print(f"  {file_type}: {path}")
+        output.append(f"  {file_type}: {path}")
     
     # Test 3: API access
-    print("\n🌐 Testing Daily Weather API...")
+    output.append("\n🌐 Testing Daily Weather API...")
     try:
-        end_date = datetime.date.today()
+        end_date = datetime.datetime.now(WITA).date()
         start_date = end_date - datetime.timedelta(days=7)
         
         test_url = (
@@ -571,36 +581,75 @@ def test_daily_api_and_files():
             f"&daily=temperature_2m_max,temperature_2m_min,precipitation_sum"
             f"&start_date={start_date.strftime('%Y-%m-%d')}"
             f"&end_date={end_date.strftime('%Y-%m-%d')}"
+            f"&timezone=Asia/Makassar"
         )
         
         response = requests.get(test_url, timeout=10)
-        print(f"  API Status: {response.status_code}")
+        output.append(f"  API Status: {response.status_code}")
         if response.status_code == 200:
             data = response.json()
-            print(f"  API Data keys: {list(data.keys())}")
+            output.append(f"  API Data keys: {list(data.keys())}")
             if 'daily' in data:
                 daily_data = data['daily']
-                print(f"  Daily data keys: {list(daily_data.keys())}")
-                print(f"  Records count: {len(daily_data['time'])}")
+                output.append(f"  Daily data keys: {list(daily_data.keys())}")
+                output.append(f"  Records count: {len(daily_data['time'])}")
         else:
-            print(f"  API Error: {response.text}")
+            output.append(f"  API Error: {response.text}")
     except Exception as api_e:
-        print(f"  API Exception: {api_e}")
+        output.append(f"  API Exception: {api_e}")
+    
+    return "\n".join(output)
+
+# ================== FLASK ENDPOINTS ==================
+@app.route('/predict/daily', methods=['GET'])
+def predict_daily():
+    try:
+        # Load model dan preprocessors
+        model, scaler, label_encoder = load_model_and_preprocessors()
+        
+        # Ambil parameter 'extended' dari query
+        extended = request.args.get('extended', 'false').lower() == 'true'
+        
+        # Jalankan prediksi harian
+        current_weather, tomorrow_prediction = make_daily_prediction(model, scaler, label_encoder)
+        
+        # Jalankan prediksi extended jika diminta
+        extended_predictions = None
+        if extended:
+            extended_predictions = make_extended_daily_prediction(model, scaler, label_encoder)
+        
+        # Simpan hasil ke JSON
+        save_daily_predictions_to_json(current_weather, tomorrow_prediction, extended_predictions)
+        
+        # Format response
+        response = {
+            "status": "success",
+            "current_weather": current_weather,
+            "tomorrow_prediction": tomorrow_prediction
+        }
+        if extended_predictions:
+            response["extended_predictions"] = extended_predictions
+        
+        return jsonify(response), 200
+    
+    except Exception as e:
+        logger.error(f"Error in predict_daily: {e}")
+        return jsonify({"status": "error", "message": str(e)}), 500
+
+@app.route('/debug', methods=['GET'])
+def debug():
+    try:
+        # Capture output dari test_daily_api_and_files
+        output = test_daily_api_and_files()
+        
+        return jsonify({"status": "success", "debug_output": output}), 200
+    
+    except Exception as e:
+        logger.error(f"Error in debug: {e}")
+        return jsonify({"status": "error", "message": str(e)}), 500
 
 # ================== MAIN ==================
 if __name__ == "__main__":
-    print("=== Daily Weather Prediction System for Denpasar ===")
-    print("1. Run daily prediction once")
-    print("2. Start daily scheduler (runs at 6:00 AM)")
-    print("3. Debug test")
-    
-    choice = input("Choose option (1, 2, or 3): ").strip()
-    
-    if choice == "1":
-        run_daily_prediction_job()
-    elif choice == "2":
-        start_daily_scheduler()
-    elif choice == "3":
-        test_daily_api_and_files()
-    else:
-        print("Invalid choice. Exiting...")
+    # Jalankan Flask server
+    logger.info("Starting Flask server...")
+    app.run(debug=True, host='0.0.0.0', port=5000)
