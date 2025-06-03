@@ -56,7 +56,7 @@ BASE_API_URL = "https://api.open-meteo.com/v1/forecast"
 # File paths menggunakan tempfile
 DAILY_HISTORY_CSV = os.path.join(tempfile.gettempdir(), "daily_weather_history.csv")
 PAST_DAYS = 30  # Sesuai model input shape
-FUTURE_DAYS = 7  # Batasi prediksi ke 7 hari untuk cegah timeout
+FUTURE_DAYS = 30 # Batasi prediksi ke 7 hari untuk cegah timeout
 
 # Fungsi untuk menemukan file model
 def find_model_files():
