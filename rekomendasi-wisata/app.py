@@ -1,20 +1,21 @@
 # app.py
 
 from flask import Flask, request, jsonify
-from src.recommender import get_recommendations, recommend_by_query_from_similarity
+from src.recommender import recommend_by_query
 import pandas as pd
 import pickle
 import re
-import os
+from scipy.sparse import load_npz
 
 app = Flask(__name__)
 
-# ==== Load hasil preprocessing ====
+# ==== Load dataset & model ====
 df = pd.read_csv('data/data_clean.csv')
 
-# Load similarity matrix
-with open('models/recommender.pkl', 'rb') as f:
-    similarity_matrix = pickle.load(f)
+with open("models/vectorizer.pkl", "rb") as f:
+    vectorizer = pickle.load(f)
+
+tfidf_matrix = load_npz("models/tfidf_matrix.npz")
 
 # ==== Utility untuk membersihkan karakter aneh ====
 def remove_directional_chars(text):
@@ -24,7 +25,7 @@ def remove_directional_chars(text):
 @app.route("/")
 def index():
     return jsonify({
-        "message": "API Rekomendasi Wisata Aktif 🚀",
+        "message": "API Rekomendasi Wisata Aktif",
         "usage": "/rekomendasi-wisata?query=...&preferensi=...&top_n=..."
     })
 
@@ -38,48 +39,37 @@ def rekomendasi():
     if not query:
         return jsonify({"error": "Parameter 'query' wajib diisi."}), 400
 
-    hasil = recommend_by_query_from_similarity(
+    hasil = recommend_by_query(
         query=query,
         df=df,
-        similarity_matrix=similarity_matrix,
+        vectorizer=vectorizer,
+        tfidf_matrix=tfidf_matrix,
         top_n=top_n,
         preferensi=preferensi if preferensi else None,
         min_rating=4.0
     )
 
-    # rekomendasi_list = []
-    # for _, row in hasil.iterrows():
-    #     rekomendasi_list.append({
-    #         "Deskripsi_Singkat": remove_directional_chars(row.get('Deskripsi_Singkat', '')),
-    #         "Kategori": row.get('Kategori'),
-    #         "Rating": row.get('Rating'),
-    #         "Jumlah_Ulasan": row.get('Jumlah_Ulasan'),
-    #         "Lokasi": row.get('Lokasi', ''),
-    #         "Ulasan_1": remove_directional_chars(row.get('Ulasan_1', '')),
-    #         "Ulasan_2": remove_directional_chars(row.get('Ulasan_2', '')),
-    #         "Ulasan_3": remove_directional_chars(row.get('Ulasan_3', '')),
-    #         "Ulasan_4": remove_directional_chars(row.get('Ulasan_4', '')),
-    #     })
+    rekomendasi_list = []
+    for _, row in hasil.iterrows():
+        rekomendasi_list.append({
+            "Nama_Destinasi": remove_directional_chars(row.get('Nama_Destinasi', '')),
+            "Deskripsi_Singkat": remove_directional_chars(row.get('Deskripsi_Singkat', '')),
+            "Kategori": row.get('Kategori'),
+            "Rating": row.get('Rating'),
+            "Jumlah_Ulasan": row.get('Jumlah_Ulasan'),
+            "Lokasi": row.get('Lokasi', ''),
+            "Ulasan_1": remove_directional_chars(row.get('Ulasan_1', '')),
+            "Ulasan_2": remove_directional_chars(row.get('Ulasan_2', '')),
+            "Ulasan_3": remove_directional_chars(row.get('Ulasan_3', '')),
+            "Ulasan_4": remove_directional_chars(row.get('Ulasan_4', '')),
+        })
 
-    # return jsonify({
-    #     "query": query,
-    #     "preferensi": preferensi,
-    #     "jumlah_rekomendasi": len(rekomendasi_list),
-    #     "hasil": rekomendasi_list
-    # })
-    
     return jsonify({
         "query": query,
         "preferensi": preferensi,
-        "jumlah_rekomendasi": len(hasil.to_dict(orient="records")),
-        "hasil": hasil.to_dict(orient="records")
+        "jumlah_rekomendasi": len(rekomendasi_list),
+        "hasil": rekomendasi_list
     })
 
-
-if __name__ == '__main__':
-    import os
-    os.makedirs('data/processed', exist_ok=True)
-    os.makedirs('models', exist_ok=True)
-    
-    port = int(os.environ.get("PORT", 5000)) 
-    app.run(host="0.0.0.0", port=port)
+if __name__ == "__main__":
+    app.run(debug=True)

@@ -1,7 +1,8 @@
 # src/recommender.py
 
-import difflib
+from sklearn.metrics.pairwise import cosine_similarity
 from src.utils import preprocess_text, slang_dict
+import numpy as np
 import pickle
 
 preferensi_map = {
@@ -17,59 +18,22 @@ preferensi_map = {
     "ramai": ["ramai", "hidup", "keramaian", "meriah", "ramai pengunjung"],
 }
 
-def get_recommendations(index, similarity_matrix, df, top_n=10,
-                        kategori_filter=True,
-                        min_rating=4.0,
-                        preferensi=None):
-    
-    sim_scores = list(enumerate(similarity_matrix[index]))
-    sim_scores = sorted(sim_scores, key=lambda x: x[1], reverse=True)
-
-    sim_scores = sim_scores[1:]
-
-    rekomendasi = []
-    for i, score in sim_scores:
-        item = df.iloc[i]
-
-        if kategori_filter and item['Kategori'] != df.iloc[index]['Kategori']:
-            continue
-
-        if item['Rating'] < min_rating:
-            continue
-
-        if preferensi:
-            preferensi = preferensi.lower()
-            keywords = preferensi_map.get(preferensi, [preferensi])
-            if not any(keyword in item['text_clean'] for keyword in keywords):
-                continue
-
-        rekomendasi.append((i, score))
-        if len(rekomendasi) >= top_n:
-            break
-
-    return df.iloc[[i for i, _ in rekomendasi]]
-
-def recommend_by_query_from_similarity(query, df, similarity_matrix, top_n=5, preferensi=None, min_rating=4.0):
+def recommend_by_query(query, df, vectorizer, tfidf_matrix, top_n=5, preferensi=None, min_rating=4.0):
     query_clean = preprocess_text(query, slang_dict)
-
-    best_index = df['text_clean'].apply(
-        lambda x: difflib.SequenceMatcher(None, x, query_clean).ratio()
-    ).idxmax()
-
-    return get_recommendations(
-        index=best_index,
-        similarity_matrix=similarity_matrix,
-        df=df,
-        top_n=top_n,
-        kategori_filter=False,
-        min_rating=min_rating,
-        preferensi=preferensi
-    )
-
-def save_similarity_matrix(similarity_matrix, path='recommender.pkl'):
-    with open(path, 'wb') as f:
-        pickle.dump(similarity_matrix, f)
-
-def load_similarity_matrix(path='recommender.pkl'):
-    with open(path, 'rb') as f:
-        return pickle.load(f)
+    query_vec = vectorizer.transform([query_clean])
+    sim_scores = cosine_similarity(query_vec, tfidf_matrix).flatten()
+    
+    sim_indices = sim_scores.argsort()[::-1]
+    hasil = []
+    for i in sim_indices:
+        row = df.iloc[i]
+        if row['Rating'] < min_rating:
+            continue
+        if preferensi:
+            keywords = preferensi_map.get(preferensi, [preferensi])
+            if not any(k in row['text_clean'] for k in keywords):
+                continue
+        hasil.append((i, sim_scores[i]))
+        if len(hasil) >= top_n:
+            break
+    return df.iloc[[i for i, _ in hasil]]
