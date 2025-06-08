@@ -9,7 +9,7 @@ Repositori ini berisi kumpulan proyek machine learning yang dikembangkan untuk m
 ---
 
 ## 📁 Struktur Direktori
-
+```bash
 machine-learning/
 │
 ├── cuaca/
@@ -25,7 +25,7 @@ machine-learning/
 └── rekomendasi-wisata/
 ├── app.py # Sistem rekomendasi wisata
 └── requirements.txt # Daftar dependensi Python
-
+```
 ---
 
 ## 🛠️ Cara Menjalankan
