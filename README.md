@@ -1,10 +1,19 @@
 # 🧠 Machine Learning Projects by Sandtara-Trip
 
+![GitHub repo size](https://img.shields.io/github/repo-size/Sandtara-Trip/machine-learning)
+![GitHub last commit](https://img.shields.io/github/last-commit/Sandtara-Trip/machine-learning)
+![GitHub](https://img.shields.io/github/license/Sandtara-Trip/machine-learning)
+
 Repositori ini berisi kumpulan proyek machine learning yang dikembangkan untuk mendukung layanan prediktif dan sistem rekomendasi berbasis data. Terdapat tiga proyek utama dalam repositori ini:
 
 - Prediksi Cuaca
+Model prediksi cuaca harian dan per jam berdasarkan data historis.
+
 - Rekomendasi Hotel
+Sistem rekomendasi hotel berdasarkan lokasi, harga, dan rating pengguna.
+
 - Rekomendasi Tempat Wisata
+Rekomendasi destinasi wisata berdasarkan deskripsi, kategori, dan beberapa ulasan pengguna.
 
 ---
 
