@@ -6,15 +6,15 @@
 
 Repositori ini berisi kumpulan proyek machine learning yang dikembangkan untuk mendukung layanan prediktif dan sistem rekomendasi berbasis data. Terdapat tiga proyek utama dalam repositori ini:
 
-- Prediksi Cuaca
+- **Prediksi Cuaca**
 
 Model prediksi cuaca harian dan per jam berdasarkan data historis.
 
-- Rekomendasi Hotel
+- **Rekomendasi Hotel**
 
 Sistem rekomendasi hotel berdasarkan lokasi, harga, dan rating pengguna.
 
-- Rekomendasi Tempat Wisata
+- **Rekomendasi Tempat Wisata**
 
 Rekomendasi destinasi wisata berdasarkan deskripsi, kategori, dan beberapa ulasan pengguna.
 
